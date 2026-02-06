@@ -322,6 +322,85 @@ impl TensorValue {
 
         TensorValue::new(&self.data * &mask)
     }
+
+    /// Scale by a scalar value
+    pub fn scale(&self, scalar: f64) -> TensorValue {
+        TensorValue::new(&self.data * scalar)
+    }
+
+    /// Add bias with broadcasting
+    /// Assumes bias has shape [hidden_dim] and self has shape [..., hidden_dim]
+    pub fn add_bias(&self, bias: &TensorValue) -> TensorValue {
+        let bias_expanded = bias.data.broadcast(self.data.raw_dim()).unwrap();
+        TensorValue::new(&self.data + &bias_expanded)
+    }
+
+    /// Concatenate tensors along a given axis
+    pub fn concat(&self, other: &TensorValue, axis: usize) -> TensorValue {
+        use ndarray::concatenate;
+        let result = concatenate(
+            Axis(axis),
+            &[self.data.view(), other.data.view()]
+        ).unwrap();
+        TensorValue::new(result)
+    }
+
+    /// Layer normalization with learned parameters
+    pub fn layer_norm_with_params(&self, weight: &TensorValue, bias: &TensorValue) -> TensorValue {
+        let eps = 1e-5;
+        let normalized = self.layer_norm(eps);
+
+        // Apply scale and shift: weight * normalized + bias
+        let scaled = normalized.mul(weight);
+        scaled.add(bias)
+    }
+
+    /// Negation
+    pub fn neg(&self) -> TensorValue {
+        TensorValue::new(-&self.data)
+    }
+
+    /// Element-wise clamp
+    pub fn clamp(&self, min: f64, max: f64) -> TensorValue {
+        TensorValue::new(self.data.mapv(|x| x.max(min).min(max)))
+    }
+
+    /// Get a slice along an axis
+    pub fn slice_axis(&self, axis: usize, start: usize, end: usize) -> TensorValue {
+        let mut slices = vec![ndarray::SliceInfoElem::Slice {
+            start: 0,
+            end: None,
+            step: 1,
+        }; self.ndim()];
+        slices[axis] = ndarray::SliceInfoElem::Slice {
+            start: start as isize,
+            end: Some(end as isize),
+            step: 1,
+        };
+        let slice_info = ndarray::SliceInfo::<_, IxDyn, IxDyn>::try_from(slices).unwrap();
+        TensorValue::new(self.data.slice(slice_info).to_owned())
+    }
+
+    /// Argmax along last axis
+    pub fn argmax(&self) -> Vec<usize> {
+        if self.ndim() == 1 {
+            let idx = self.data.iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            vec![idx]
+        } else {
+            let last_axis = self.ndim() - 1;
+            self.data.map_axis(Axis(last_axis), |row| {
+                row.iter()
+                    .enumerate()
+                    .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                    .map(|(i, _)| i)
+                    .unwrap_or(0)
+            }).iter().cloned().collect()
+        }
+    }
 }
 
 impl fmt::Debug for TensorValue {

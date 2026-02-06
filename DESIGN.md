@@ -478,6 +478,200 @@ Would measure:
 3. GPU acceleration for streams
 4. Distributed stream processing
 
+## ML Training Framework
+
+### 12. Tensor Operations (tensor.rs)
+
+**Purpose**: Multi-dimensional array operations for neural networks.
+
+**Key Features**:
+```rust
+pub struct TensorValue {
+    pub data: ArrayD<f64>,
+    pub requires_grad: bool,
+    pub grad: Option<ArrayD<f64>>,
+}
+```
+
+**Operations**:
+- Element-wise: add, sub, mul, div, relu, sigmoid, tanh
+- Matrix: matmul, bmm (batched), transpose
+- Reductions: sum, mean (with axis support)
+- Normalization: softmax, layer_norm
+- Initialization: zeros, ones, xavier, he
+
+### 13. Automatic Differentiation (autodiff.rs)
+
+**Purpose**: Compute gradients via reverse-mode AD (backpropagation).
+
+**Design**: Gradient tape records operations during forward pass.
+
+```rust
+pub struct GradientTape {
+    entries: Vec<TapeEntry>,
+    gradients: HashMap<TapeNodeId, ArrayD<f64>>,
+}
+
+pub enum TapeOp {
+    Input,
+    Parameter,
+    Add { left, right },
+    MatMul { left, right },
+    Relu { input },
+    Softmax { input },
+    CrossEntropyLoss { logits, targets },
+    // ...
+}
+```
+
+**Backward Pass**:
+1. Initialize output gradient as 1
+2. Traverse tape in reverse order
+3. Apply chain rule for each operation
+4. Accumulate gradients for shared nodes
+
+### 14. Optimizers (optimizer_ml.rs)
+
+**Purpose**: Update parameters based on gradients.
+
+**Supported Optimizers**:
+```rust
+pub enum OptimizerConfig {
+    SGD { lr, momentum, weight_decay, nesterov },
+    Adam { lr, beta1, beta2, eps, weight_decay },
+    AdamW { lr, beta1, beta2, eps, weight_decay },
+    RMSprop { lr, alpha, eps, weight_decay, momentum },
+}
+```
+
+**Learning Rate Schedulers**:
+- Constant
+- StepLR (decay every N epochs)
+- ExponentialLR
+- CosineAnnealing
+- LinearWarmup
+
+### 15. Training Infrastructure (trainer.rs, data.rs)
+
+**Data Loading**:
+```rust
+pub struct DataLoader {
+    dataset: Dataset,
+    batch_size: usize,
+    shuffle: bool,
+}
+
+impl Iterator for DataLoader {
+    type Item = (TensorValue, TensorValue);  // (inputs, targets)
+}
+```
+
+**Training Loop**:
+```rust
+pub struct Trainer {
+    config: TrainingConfig,
+    optimizer: MLOptimizer,
+}
+
+impl Trainer {
+    pub fn train(&mut self, model, train_data, val_data) -> TrainingMetrics {
+        for epoch in 0..config.epochs {
+            for (inputs, targets) in train_data {
+                // Forward pass
+                let output = model.forward(&inputs, &mut tape);
+                let loss = compute_loss(&output, &targets);
+
+                // Backward pass
+                tape.backward(loss_id);
+
+                // Update parameters
+                self.optimizer.step(&mut params, &grads);
+            }
+        }
+    }
+}
+```
+
+### 16. Causal Language Models (causal_lm.rs)
+
+**Purpose**: GPT-style autoregressive text generation.
+
+**Causal Attention**:
+```rust
+pub fn create_causal_mask(seq_len: usize) -> TensorValue {
+    // Returns mask where position i can only attend to positions <= i
+    // 0 for allowed, -inf for masked
+}
+
+pub struct CausalAttention {
+    query_weights, key_weights, value_weights, output_weights,
+    hidden_dim, num_heads, head_dim,
+}
+```
+
+**Model Architecture**:
+```rust
+pub struct CausalLM {
+    token_embeddings: TensorValue,      // [vocab_size, hidden_dim]
+    position_embeddings: TensorValue,   // [max_seq_len, hidden_dim]
+    blocks: Vec<DecoderBlock>,          // Self-attention + FF
+    output_weights: TensorValue,        // [hidden_dim, vocab_size]
+}
+```
+
+**Text Generation**:
+```rust
+pub struct Generator<T: Tokenizer> {
+    model: CausalLM,
+    tokenizer: T,
+}
+
+impl Generator {
+    pub fn generate(&self, prompt: &str, config: &SamplingConfig) -> String {
+        // Encode prompt
+        // Loop: forward pass → sample token → append
+        // Decode and return
+    }
+}
+```
+
+**Sampling Strategies**:
+- Greedy: Always pick highest probability
+- Temperature: Scale logits before softmax
+- Top-k: Only consider k highest probability tokens
+- Top-p (nucleus): Consider smallest set with cumulative prob > p
+- Repetition penalty: Reduce probability of recent tokens
+
+### 17. Tokenization (tokenizer.rs)
+
+**Purpose**: Convert text to/from token IDs.
+
+**Tokenizer Types**:
+```rust
+pub trait Tokenizer {
+    fn encode(&self, text: &str) -> Vec<usize>;
+    fn decode(&self, tokens: &[usize]) -> String;
+    fn vocab_size(&self) -> usize;
+}
+
+// Character-level (simplest)
+pub struct CharTokenizer { ... }
+
+// Byte-pair encoding (trainable)
+pub struct BPETokenizer { ... }
+
+// Word-level with fixed vocabulary
+pub struct WordTokenizer { ... }
+```
+
+**Special Tokens**:
+- `<pad>` (0): Padding
+- `<unk>` (1): Unknown token
+- `<bos>` (2): Beginning of sequence
+- `<eos>` (3): End of sequence
+
 ## Conclusion
 
 This implementation demonstrates a complete, production-quality compiler for a dataflow language with sophisticated optimizations. The modular design allows easy extension and experimentation with new optimization techniques.
+
+The ML training framework extends Lucid's capabilities to neural network training, with full automatic differentiation, modern optimizers, and text generation support. While the toy models are too small for coherent output, the infrastructure is in place for scaling up with GPU acceleration.

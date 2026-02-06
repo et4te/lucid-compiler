@@ -25,6 +25,12 @@ cargo test
 
 # Run examples
 cargo run --example fibonacci
+cargo run --example tinybert_train
+cargo run --example tiny_chatbot
+
+# Build with GPU support
+cargo build --features cuda    # NVIDIA CUDA
+cargo build --features metal   # Apple Metal
 ```
 
 ## Quick Start
@@ -386,6 +392,82 @@ pub enum Value {
     Float(f64),
     Bool(bool),
     Stream(Vec<Value>),
+    Tensor(TensorValue),
+}
+```
+
+### TensorValue
+
+```rust
+pub struct TensorValue {
+    pub data: ArrayD<f64>,
+    pub requires_grad: bool,
+    pub grad: Option<ArrayD<f64>>,
+}
+
+impl TensorValue {
+    // Creation
+    pub fn zeros(shape: &[usize]) -> Self;
+    pub fn ones(shape: &[usize]) -> Self;
+    pub fn xavier(shape: &[usize]) -> Self;
+    pub fn he(shape: &[usize]) -> Self;
+
+    // Operations
+    pub fn matmul(&self, other: &TensorValue) -> TensorValue;
+    pub fn bmm(&self, other: &TensorValue) -> TensorValue;
+    pub fn softmax(&self) -> TensorValue;
+    pub fn relu(&self) -> TensorValue;
+    pub fn layer_norm(&self, eps: f64) -> TensorValue;
+
+    // Reductions
+    pub fn sum(&self) -> TensorValue;
+    pub fn mean(&self) -> TensorValue;
+    pub fn sum_axis(&self, axis: usize) -> TensorValue;
+}
+```
+
+### Training Types
+
+```rust
+pub struct TrainingConfig {
+    pub epochs: usize,
+    pub batch_size: usize,
+    pub learning_rate: f64,
+    pub optimizer: OptimizerConfig,
+    pub scheduler: LRScheduler,
+    pub early_stopping_patience: usize,
+    pub grad_clip: f64,
+    pub print_every: usize,
+}
+
+pub struct TrainingMetrics {
+    pub epoch_losses: Vec<f64>,
+    pub val_losses: Vec<f64>,
+    pub final_loss: f64,
+    pub best_val_loss: f64,
+    pub best_epoch: usize,
+}
+```
+
+### Generator Types
+
+```rust
+pub struct SamplingConfig {
+    pub temperature: f64,       // 0.0 = greedy, higher = more random
+    pub top_k: usize,           // 0 = disabled
+    pub top_p: f64,             // 1.0 = disabled
+    pub repetition_penalty: f64, // 1.0 = disabled
+    pub max_tokens: usize,
+}
+
+pub struct Generator<T: Tokenizer> {
+    pub model: CausalLM,
+    pub tokenizer: T,
+}
+
+impl<T: Tokenizer> Generator<T> {
+    pub fn generate(&self, prompt: &str, config: &SamplingConfig) -> String;
+    pub fn chat(&self, config: &SamplingConfig);
 }
 ```
 
@@ -512,6 +594,196 @@ fn state_machine() {
 }
 ```
 
+## ML Training
+
+### Training a Neural Network
+
+```rust
+use lucid_compiler::{
+    Trainer, TrainingConfig, SimpleModel,
+    Dataset, DataLoader, OptimizerConfig, LRScheduler
+};
+
+fn main() {
+    // Create a 3-layer neural network: 16 → 64 → 32 → 5
+    let model = SimpleModel::new(&[16, 64, 32, 5]);
+
+    // Create synthetic classification data
+    let dataset = Dataset::synthetic_classification(1000, 16, 5);
+    let (train_data, val_data) = dataset.split(0.8);
+
+    // Configure training
+    let config = TrainingConfig {
+        epochs: 10,
+        batch_size: 32,
+        learning_rate: 0.001,
+        optimizer: OptimizerConfig::adam(0.001),
+        scheduler: LRScheduler::CosineAnnealing { t_max: 10, lr_min: 1e-6 },
+        early_stopping_patience: 3,
+        grad_clip: 1.0,
+        ..Default::default()
+    };
+
+    // Train
+    let mut trainer = Trainer::new(config);
+    let metrics = trainer.train(&model, &train_data, Some(&val_data));
+
+    println!("Training complete!");
+    println!("  Final loss: {:.4}", metrics.final_loss);
+    println!("  Best val loss: {:.4}", metrics.best_val_loss);
+}
+```
+
+### Using Different Optimizers
+
+```rust
+// SGD with momentum
+let optimizer = OptimizerConfig::sgd_momentum(0.01, 0.9);
+
+// Adam (default)
+let optimizer = OptimizerConfig::adam(0.001);
+
+// AdamW with weight decay
+let optimizer = OptimizerConfig::adamw(0.001, 0.01);
+```
+
+### Loading Data from CSV
+
+```rust
+// CSV format: input1,input2,...,target1,target2,...
+let dataset = Dataset::from_csv("data/train.csv", 10, 3)?;
+```
+
+## Text Generation
+
+### Basic Generation
+
+```rust
+use lucid_compiler::{
+    CausalLM, Generator, SamplingConfig,
+    CharTokenizer, Tokenizer
+};
+
+fn main() {
+    // Create tokenizer
+    let tokenizer = CharTokenizer::new();
+
+    // Create a tiny model (for demonstration)
+    let model = CausalLM::new(
+        tokenizer.vocab_size(),  // vocab_size
+        64,                      // hidden_dim
+        2,                       // num_layers
+        2,                       // num_heads
+        128,                     // ff_dim
+        128,                     // max_seq_len
+    );
+
+    // Create generator
+    let generator = Generator::new(model, tokenizer);
+
+    // Configure sampling
+    let config = SamplingConfig {
+        temperature: 0.7,    // Higher = more random
+        top_k: 40,           // Only consider top 40 tokens
+        top_p: 0.9,          // Nucleus sampling threshold
+        repetition_penalty: 1.1,
+        max_tokens: 100,
+    };
+
+    // Generate text
+    let output = generator.generate("Hello, how are ", &config);
+    println!("{}", output);
+}
+```
+
+### Sampling Strategies
+
+```rust
+// Greedy decoding (deterministic)
+let config = SamplingConfig::greedy();
+
+// Default (balanced)
+let config = SamplingConfig::default();
+
+// Creative (more random)
+let config = SamplingConfig::creative();
+
+// Custom
+let config = SamplingConfig {
+    temperature: 1.2,
+    top_k: 0,      // Disable top-k
+    top_p: 0.95,   // Use nucleus sampling
+    ..Default::default()
+};
+```
+
+### Interactive Chat
+
+```rust
+// Start interactive chat session
+generator.chat(&config);
+
+// In the chat:
+// - Type messages and press Enter
+// - Type 'quit' to exit
+// - Type 'config' to adjust sampling parameters
+```
+
+### Training a BPE Tokenizer
+
+```rust
+use lucid_compiler::BPETokenizer;
+
+// Train BPE on corpus
+let corpus = std::fs::read_to_string("data/corpus.txt")?;
+let tokenizer = BPETokenizer::train(&corpus, 10000, 2);  // vocab_size, min_freq
+
+// Save/load tokenizer
+tokenizer.save("tokenizer.txt")?;
+let tokenizer = BPETokenizer::load("tokenizer.txt")?;
+```
+
+## Lucid Training Syntax
+
+### Defining Parameters
+
+```lucid
+// Trainable parameters with shape and initializer
+param embed_weights: [vocab_size, hidden_dim] = xavier;
+param query_weights: [hidden_dim, hidden_dim] = xavier;
+param bias: [hidden_dim] = zeros;
+```
+
+### Dimension-Annotated Operations
+
+```lucid
+// Matrix multiply along batch dimension
+fn embed(x) = x @.batch embed_weights;
+
+// Softmax along sequence dimension
+fn attention(q, k, v) =
+    let scores = softmax.seq(q @.batch k)
+    in scores @.batch v;
+
+// Temporal delay along time dimension
+fn running_sum(x) = x fby.t (running_sum + x);
+```
+
+### Training Configuration
+
+```lucid
+// Full training block
+train {
+    input: token_ids,
+    target: labels,
+    model: transformer(token_ids),
+    loss: cross_entropy,
+    optimizer: adam(lr=0.001),
+    epochs: 10,
+    batch_size: 32
+}
+```
+
 ## Troubleshooting
 
 ### Common Errors
@@ -564,6 +836,59 @@ See CONTRIBUTING.md for guidelines on:
 - Testing requirements
 - Documentation standards
 - Pull request process
+
+## Making the Chatbot Coherent
+
+The `tiny_chatbot` example produces random-looking output because the model is too small. Here's what's needed for coherent responses:
+
+### Why It's Not Working
+
+| Factor | Current | Needed |
+|--------|---------|--------|
+| Parameters | ~26K | 100M+ |
+| Hidden dim | 64 | 768+ |
+| Layers | 2 | 12+ |
+| Training data | 10 sentences | Billions of tokens |
+| Compute | CPU | GPU |
+
+### Options to Improve
+
+**Option 1: Load Pre-trained Weights**
+
+Download GPT-2 or similar weights and load them:
+```rust
+// Future API
+let model = CausalLM::from_pretrained("gpt2")?;
+```
+
+**Option 2: Scale Up with GPU**
+
+Enable GPU acceleration:
+```bash
+cargo build --features cuda  # NVIDIA
+cargo build --features metal # Apple
+```
+
+Then create a larger model and train on more data.
+
+**Option 3: Use as a DSL**
+
+Write model architecture in Lucid, compile to PyTorch:
+```lucid
+model gpt {
+    param embeddings: [50000, 768] = xavier;
+    // ...
+}
+compile gpt -> pytorch("model.pt")
+```
+
+**Option 4: Fine-tune Existing Model**
+
+1. Load pre-trained weights
+2. Fine-tune on conversational data
+3. Apply RLHF for better responses
+
+See `examples/tiny_chatbot.rs` for detailed guidance.
 
 ## License
 

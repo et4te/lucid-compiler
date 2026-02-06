@@ -3,13 +3,24 @@
 A comprehensive implementation of a compiler for the Lucid dataflow programming language in Rust, featuring:
 
 - **Demand-driven evaluation** with lazy stream processing
-- **Temporal operators** (`fby`, `next`, `prev`, `first`)
+- **Temporal operators** (`fby`, `next`, `prev`, `first`) with dimension annotations
 - **Higher-order functions** with lambda expressions
+- **ML Training Framework**:
+  - Tensor operations with automatic differentiation
+  - SGD, Adam, AdamW, RMSprop optimizers
+  - Learning rate schedulers
+  - Data loading and batching
+- **Causal Language Models**:
+  - Tokenization (character-level, BPE, word-level)
+  - Causal attention with masking
+  - Text generation with sampling strategies
+  - Interactive chat mode
 - **Advanced optimizations**:
   - Common Subexpression Elimination (CSE)
   - Demand Analysis
   - Loop Fusion
   - Buffer Minimization
+- **Optional GPU acceleration** via candle
 
 ## Architecture
 
@@ -29,6 +40,16 @@ Source Code
     └── Buffer Minimization
     ↓
 [Evaluator] → Results (with memoization)
+
+ML Training Pipeline:
+    ↓
+[Tensor Ops] → Forward Pass
+    ↓
+[AutoDiff] → Gradient Tape → Backward Pass
+    ↓
+[Optimizer] → Parameter Updates
+    ↓
+[Trainer] → Training Loop
 ```
 
 ## Language Features
@@ -81,6 +102,46 @@ Where clauses (for recursive definitions):
 ```
 fib where {
     fib = 0 fby 1 fby fib + next fib
+}
+```
+
+### Dimension-Annotated Operations
+
+Temporal and tensor operations can be annotated with dimensions:
+```lucid
+// Temporal delay along sequence dimension
+x fby.seq y
+
+// Matrix multiply along batch dimension
+a @.batch b
+
+// Softmax along sequence dimension
+softmax.seq(x)
+
+// Layer norm along hidden dimension
+layer_norm.hidden(x)
+```
+
+### ML Training Syntax
+
+Define trainable parameters and training configuration:
+```lucid
+// Trainable parameters with initializers
+param weights: [input_dim, hidden_dim] = xavier;
+param bias: [hidden_dim] = zeros;
+
+// Model definition
+fn forward(x) = relu(x @.batch weights + bias);
+
+// Training configuration
+train {
+    input: x,
+    target: y,
+    model: forward(x),
+    loss: cross_entropy,
+    optimizer: adam(lr=0.001),
+    epochs: 10,
+    batch_size: 32
 }
 ```
 
@@ -230,12 +291,89 @@ cargo run
 
 # Run with verbose output
 cargo run -- --verbose
+
+# Run ML training example
+cargo run --example tinybert_train
+
+# Run chatbot example
+cargo run --example tiny_chatbot
+
+# Build with GPU support (CUDA)
+cargo build --features cuda
+
+# Build with GPU support (Metal/Apple Silicon)
+cargo build --features metal
+```
+
+## ML Training Example
+
+```rust
+use lucid_compiler::{
+    Trainer, TrainingConfig, SimpleModel,
+    Dataset, DataLoader, OptimizerConfig
+};
+
+fn main() {
+    // Create a simple neural network
+    let model = SimpleModel::new(&[16, 64, 32, 5]);
+
+    // Generate synthetic data
+    let dataset = Dataset::synthetic_classification(1000, 16, 5);
+    let (train_data, val_data) = dataset.split(0.8);
+
+    // Configure training
+    let config = TrainingConfig {
+        epochs: 10,
+        batch_size: 32,
+        learning_rate: 0.001,
+        ..Default::default()
+    };
+
+    // Train the model
+    let mut trainer = Trainer::new(config);
+    let metrics = trainer.train(&model, &train_data, Some(&val_data));
+
+    println!("Final loss: {:.4}", metrics.final_loss);
+}
+```
+
+## Text Generation Example
+
+```rust
+use lucid_compiler::{
+    CausalLM, Generator, SamplingConfig, CharTokenizer, Tokenizer
+};
+
+fn main() {
+    // Create tokenizer and model
+    let tokenizer = CharTokenizer::new();
+    let model = CausalLM::tiny(tokenizer.vocab_size());
+
+    // Create generator
+    let generator = Generator::new(model, tokenizer);
+
+    // Generate text
+    let config = SamplingConfig {
+        temperature: 0.7,
+        top_k: 40,
+        top_p: 0.9,
+        max_tokens: 100,
+        ..Default::default()
+    };
+
+    let output = generator.generate("Hello, ", &config);
+    println!("Generated: {}", output);
+
+    // Interactive chat
+    generator.chat(&config);
+}
 ```
 
 ## Implementation Details
 
 ### Module Structure
 
+**Core Compiler:**
 - `lexer.rs`: Tokenization using `logos`
 - `parser.rs`: Parsing using `chumsky`
 - `ast.rs`: Abstract syntax tree definitions
@@ -246,6 +384,18 @@ cargo run -- --verbose
 - `loop_fusion.rs`: Loop fusion and buffer minimization
 - `evaluator.rs`: Demand-driven evaluator
 - `optimizer.rs`: Orchestrates all optimization passes
+
+**ML Training:**
+- `tensor.rs`: Multi-dimensional arrays with operations
+- `autodiff.rs`: Automatic differentiation (gradient tape)
+- `loss.rs`: Loss functions (MSE, cross-entropy)
+- `optimizer_ml.rs`: SGD, Adam, AdamW, RMSprop optimizers
+- `data.rs`: Dataset and DataLoader utilities
+- `trainer.rs`: Training loop infrastructure
+
+**Language Models:**
+- `tokenizer.rs`: Character, BPE, and word tokenizers
+- `causal_lm.rs`: Causal attention and text generation
 
 ### Key Data Structures
 
@@ -289,6 +439,7 @@ pub enum Node {
 
 ## Future Enhancements
 
+**Core Compiler:**
 - [ ] Incremental evaluation
 - [ ] Parallel evaluation of independent streams
 - [ ] JIT compilation to native code
@@ -298,6 +449,38 @@ pub enum Node {
 - [ ] Visual dataflow graph debugging
 - [ ] Advanced type system
 - [ ] Automatic parallelization
+
+**ML Framework:**
+- [x] Tensor operations (matmul, softmax, layer_norm, etc.)
+- [x] Automatic differentiation (backpropagation)
+- [x] Optimizers (SGD, Adam, AdamW, RMSprop)
+- [x] Learning rate schedulers
+- [x] Data loading and batching
+- [x] Training with validation and early stopping
+- [ ] Load pre-trained weights (GPT-2, etc.)
+- [ ] Mixed precision training (FP16/BF16)
+- [ ] Distributed training
+
+**Language Models:**
+- [x] Tokenization (character, BPE, word)
+- [x] Causal attention with masking
+- [x] Text generation (greedy, top-k, top-p, temperature)
+- [x] Interactive chat mode
+- [ ] KV-cache for efficient generation
+- [ ] Beam search decoding
+- [ ] Pre-trained model loading
+
+## Making the Chatbot Coherent
+
+The tiny chatbot example produces random-looking output because it's too small. For coherent responses:
+
+1. **Scale up**: Hidden dim 768+, 12+ layers, 12+ heads (~100M+ parameters)
+2. **Train on data**: Billions of tokens, not 10 sentences
+3. **Use GPU**: Enable `--features cuda` or `--features metal`
+4. **Load pre-trained**: Download GPT-2 weights from Hugging Face
+5. **Fine-tune**: Train on conversational data with RLHF
+
+See `examples/tiny_chatbot.rs` for detailed guidance.
 
 ## References
 

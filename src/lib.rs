@@ -18,6 +18,10 @@ pub mod optimizer_ml;
 pub mod data;
 pub mod trainer;
 
+// Language model modules
+pub mod tokenizer;
+pub mod causal_lm;
+
 use ast::Program;
 use dataflow::DataflowGraph;
 use evaluator::{DemandEvaluator, EvalError};
@@ -30,6 +34,8 @@ pub use loss::LossType;
 pub use optimizer_ml::{MLOptimizer, OptimizerConfig, LRScheduler};
 pub use data::{Dataset, DataLoader, Sample};
 pub use trainer::{Trainer, TrainingConfig, TrainingMetrics, SimpleModel};
+pub use tokenizer::{Tokenizer, CharTokenizer, BPETokenizer, WordTokenizer};
+pub use causal_lm::{CausalLM, Generator, SamplingConfig, create_causal_mask};
 
 /// Main compiler pipeline
 pub struct LucidCompiler {
