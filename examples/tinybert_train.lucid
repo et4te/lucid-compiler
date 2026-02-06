@@ -1,0 +1,91 @@
+// TinyBERT Training Example in Lucid
+// This demonstrates both:
+// 1. Training syntax (param, train blocks)
+// 2. Dimension-annotated operations (@.batch, fby.seq, etc.)
+
+// === Trainable Parameters ===
+// Parameters are declared with shape and initializer
+param embed_weights: [vocab_size, hidden_dim] = xavier;
+param query_weights: [hidden_dim, hidden_dim] = xavier;
+param key_weights: [hidden_dim, hidden_dim] = xavier;
+param value_weights: [hidden_dim, hidden_dim] = xavier;
+param ff_weights1: [hidden_dim, ff_dim] = xavier;
+param ff_weights2: [ff_dim, hidden_dim] = xavier;
+param classifier_weights: [hidden_dim, num_classes] = xavier;
+
+// === Embedding Layer ===
+// The @ operator performs matrix multiplication
+// @.batch means batched matrix multiply (applies to each sample in batch)
+fn embed(token_ids) = token_ids @.batch embed_weights;
+
+// === Position Encoding ===
+// Uses fby.seq to accumulate position indices along the sequence dimension
+fn position_encoding(x) =
+    let pos = 0 fby.seq (pos + 1),
+        pos_embed = pos * 0.01  // Simplified sinusoidal
+    in x + pos_embed;
+
+// === Self-Attention with Dimension Annotations ===
+// @.batch applies matrix multiply per batch
+// softmax.seq applies softmax along sequence dimension
+fn attention(x) =
+    let q = x @.batch query_weights,
+        k = x @.batch key_weights,
+        v = x @.batch value_weights,
+        // Attention scores: Q @ K^T (simplified, no scaling)
+        scores = softmax.seq(q @.batch k),
+        // Weighted values
+        attended = scores @.batch v
+    in attended;
+
+// === Feed-Forward Network ===
+// relu is applied element-wise
+fn feedforward(x) =
+    let hidden = relu(x @.batch ff_weights1),
+        output = hidden @.batch ff_weights2
+    in output;
+
+// === Residual Connection ===
+// Add skip connection (core transformer pattern)
+fn residual(x, sublayer) = x + sublayer;
+
+// === Layer Normalization ===
+// layer_norm.hidden normalizes along hidden dimension
+fn normalize(x) = layer_norm.hidden(x);
+
+// === Transformer Layer ===
+// Combines attention, feedforward, residuals, and normalization
+fn transformer_layer(x) =
+    let attn_out = normalize(residual(x, attention(x))),
+        ff_out = normalize(residual(attn_out, feedforward(attn_out)))
+    in ff_out;
+
+// === Classification Head ===
+// first.seq extracts the [CLS] token (first position in sequence)
+fn classify(x) =
+    let cls_token = first.seq x,
+        logits = cls_token @.batch classifier_weights
+    in logits;
+
+// === Full Model ===
+fn tinybert(token_ids) =
+    let embedded = position_encoding(embed(token_ids)),
+        encoded = transformer_layer(embedded),
+        output = classify(encoded)
+    in output;
+
+// === Training Configuration ===
+// The train block specifies how to train the model
+train {
+    input: token_ids,
+    target: labels,
+    model: tinybert(token_ids),
+    loss: cross_entropy,
+    optimizer: adam(lr=0.001),
+    epochs: 10,
+    batch_size: 32
+}
+
+// === Main Expression ===
+// For inference, just run the model
+tinybert(token_ids)

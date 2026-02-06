@@ -1,0 +1,80 @@
+// TinyBERT-inspired example in Lucid with Multi-Dimensional Support
+// This demonstrates transformer-like computations using Lucid's dataflow semantics
+// with explicit dimension annotations for clarity and optimization.
+//
+// Dimension annotations:
+// - .t    : time dimension (global sequence of inputs)
+// - .seq  : sequence dimension (token position within a sequence)
+// - .batch: batch dimension (parallel processing of sequences)
+// - .head : attention head dimension
+
+// === Example 1: Token Embedding Stream ===
+// Simulates processing a stream of token IDs through an embedding lookup
+// Using .t (time) dimension for the stream of embeddings arriving over time
+token_embedding = 1 fby.t 2 fby.t 3 fby.t 4;
+
+// === Example 2: Positional Encoding ===
+// Add position information to embeddings
+// Position accumulates in the sequence dimension
+position = 0 fby.seq (position + 1);
+embedded_with_pos = token_embedding + position;
+
+// === Example 3: Tensor Literals for Weights ===
+// Define weight matrices as tensor literals
+query_weights = [1, 0, 1];
+key_weights = [0, 1, 1];
+value_weights = [1, 1, 0];
+
+// === Example 4: Simplified Self-Attention ===
+// Attention across the sequence dimension
+// This is a simplified "attention" that looks at current and previous values
+prev_value = 0 fby.seq embedded_with_pos;
+attention_score = embedded_with_pos * prev_value;
+attended = (embedded_with_pos + prev_value) / 2;
+
+// === Example 5: Multi-Head Attention with Dimension Annotation ===
+// Process through multiple attention heads in the .head dimension
+// Each head applies different transformations
+head1 = attended * 1 fby.head attended * 2;
+head2 = attended * 2 fby.head attended * 1;
+concat_heads = (head1 + head2) / 2;
+
+// === Example 6: Feed-Forward Layer ===
+// Two-layer MLP with ReLU-like activation
+// Processing happens independently for each position in .seq dimension
+ff_hidden = attended * 2 + 1;
+ff_output = if ff_hidden > 0 then ff_hidden else 0;
+
+// === Example 7: Residual Connection ===
+// Add skip connection (core transformer pattern)
+// Residuals flow across time dimension
+residual = embedded_with_pos + ff_output;
+
+// === Example 8: Running Mean (Layer Norm approximation) ===
+// Compute running statistics for normalization
+// Statistics accumulate over time dimension
+running_sum = 0 fby.t (running_sum + residual);
+count = 1 fby.t (count + 1);
+running_mean = running_sum / count;
+
+// === Example 9: Batch Processing ===
+// Process multiple sequences in parallel using .batch dimension
+// This demonstrates how batch processing can be expressed
+batch_input = token_embedding fby.batch (token_embedding + 100);
+batch_output = batch_input + running_mean;
+
+// === Example 10: Temporal Next Operator ===
+// Look ahead in the sequence (for bidirectional models)
+next_token = next.seq embedded_with_pos;
+bidirectional = (prev_value + embedded_with_pos + next_token) / 3;
+
+// === Example 11: First Value Extraction ===
+// Extract the initial value (like [CLS] token in BERT)
+cls_token = first.seq embedded_with_pos;
+
+// === Final Output ===
+// Combine all components with dimension-aware operations
+output = concat_heads + running_mean + cls_token;
+
+// Main expression to evaluate
+output
